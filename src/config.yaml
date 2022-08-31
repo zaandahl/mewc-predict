@@ -1,6 +1,7 @@
 INPUT_DIR: "/images/"
 EN_FILE: "en_out.pkl"
 EN_CSV: "en_out.csv"
+RENAME_SNIPS: True
 SNIP_DIR: "snips"
 SNIP_CHARS: 16
 TARGET_SIZE: 240

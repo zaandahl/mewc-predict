@@ -56,16 +56,16 @@ pred_df = pd.melt(pred_df, id_vars=['filename', 'label'], value_vars=class_ids, 
 pred_df["class_name"] = pred_df["class_id"].replace(class_map)
 # Rank the class probabilities grouped by filename
 pred_df["class_rank"] = pred_df.groupby("filename")["prob"].rank("average", ascending=False)
-print("Renaming snip files using " + str(config["SNIP_CHARS"]) + " alphanumeric characters...")
-pred_df["rand_name"] = ''
-for path in tqdm(Path(config["INPUT_DIR"],config["SNIP_DIR"]).iterdir()):
-    if path.is_file():
-        file_ext = path.suffix
-        directory = path.parent
-        new_name = ''.join(random.choices(string.ascii_letters + string.digits, k=int(config["SNIP_CHARS"]))) + file_ext
-        pred_df.loc[pred_df['filename'] == path.name, 'rand_name'] = new_name
-        path.rename(Path(directory,new_name))
-
+if(config["RENAME_SNIPS"] == "True"):
+    print("Renaming snip files using " + str(config["SNIP_CHARS"]) + " alphanumeric characters...")
+    pred_df["rand_name"] = ''
+    for path in tqdm(Path(config["INPUT_DIR"],config["SNIP_DIR"]).iterdir()):
+        if path.is_file():
+            file_ext = path.suffix
+            directory = path.parent
+            new_name = ''.join(random.choices(string.ascii_letters + string.digits, k=int(config["SNIP_CHARS"]))) + file_ext
+            pred_df.loc[pred_df['filename'] == path.name, 'rand_name'] = new_name
+            path.rename(Path(directory,new_name))
 
 pred_df.to_pickle(Path(config["INPUT_DIR"],config["EN_FILE"]))
 pred_df.to_csv(Path(config["INPUT_DIR"],config["EN_CSV"]))
