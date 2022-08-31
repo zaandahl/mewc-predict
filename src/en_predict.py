@@ -1,17 +1,13 @@
 import os
 import random
 import string
-import yaml
 import pandas as pd
 import tensorflow as tf
 from pathlib import Path
 from tqdm import tqdm 
 from tensorflow.keras.models import load_model
+from lib_common import read_yaml
 import tensorflow_addons as tfa
-
-def read_yaml(file_path):
-    with open(file_path, 'r') as f:
-        return yaml.safe_load(f)
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
