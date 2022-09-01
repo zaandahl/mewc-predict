@@ -17,9 +17,17 @@ for conf_key in config.keys():
         config[conf_key] = os.environ[conf_key]
 
 # TODO create a default class map here if one isn't supplied
-class_map = read_yaml("class_list.yaml")
-inv_class = {v: k for k, v in class_map.items()}
+# class_map = read_yaml("class_list.yaml")
+# inv_class = {v: k for k, v in class_map.items()}
 #print(sorted(class_list.values()))
+
+if Path.exists(Path("/code/class_list.yaml")):
+    class_map = read_yaml("class_list.yaml")
+else:
+    #class_list = [str(f.name) for f in Path("/images").iterdir() if f.is_dir()]
+    class_list = list(range(0,100))
+    class_map = {class_list[i]: class_list[i] for i in range(len(class_list))}
+inv_class = {v: k for k, v in class_map.items()}
 
 # TODO check for model existence and exit gracefully if no model supplied
 if Path.is_file("/code/model.h5"):
