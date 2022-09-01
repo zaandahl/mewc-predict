@@ -16,10 +16,12 @@ for conf_key in config.keys():
     if conf_key in os.environ:
         config[conf_key] = os.environ[conf_key]
 
+# TODO create a default class map here if one isn't supplied
 class_map = read_yaml("class_list.yaml")
 inv_class = {v: k for k, v in class_map.items()}
 #print(sorted(class_list.values()))
 
+# TODO check for model existence and exit gracefully if no model supplied
 gpus = tf.config.list_logical_devices('GPU')
 print(gpus)
 strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
@@ -27,7 +29,6 @@ with strategy.scope():
     en_model = load_model("/code/model.h5",
         custom_objects={'loss': tfa.losses.SigmoidFocalCrossEntropy()})
 en_model.summary()
-
 
 img_generator = tf.keras.preprocessing.image_dataset_from_directory(
     config["INPUT_DIR"], 
