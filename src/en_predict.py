@@ -33,10 +33,10 @@ inv_class = {v: k for k, v in class_map.items()}
 if Path.is_file(Path("/code/model.h5")):
     gpus = tf.config.list_logical_devices('GPU')
     print(gpus)
-    strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
-    with strategy.scope():
-        en_model = load_model("/code/model.h5",
-            custom_objects={'loss': tfa.losses.SigmoidFocalCrossEntropy()})
+    #strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
+    #with strategy.scope():
+    en_model = load_model("/code/model.h5",
+        custom_objects={'loss': tfa.losses.SigmoidFocalCrossEntropy()})
     en_model.summary()
 else: 
     exit("ERROR: you must bind mount your EfficientNet model to /code/model.h5")
