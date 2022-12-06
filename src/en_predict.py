@@ -79,10 +79,8 @@ if(config["RENAME_SNIPS"] == "True"):
             pred_df.loc[pred_df['filename'] == path.name, 'rand_name'] = new_name
             path.rename(Path(directory,new_name))
 
+if(config["TOP_CLASSES"] == "True"):
+    pred_df = pred_df[pred_df["class_rank"] == 1.0]
+
 pred_df.to_pickle(Path(config["INPUT_DIR"],config["EN_FILE"]))
 pred_df.to_csv(Path(config["INPUT_DIR"],config["EN_CSV"]))
-
-
-
-
-
