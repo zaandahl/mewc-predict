@@ -1,0 +1,6 @@
+services:
+  app:
+    image: zaandahl/en-predict
+    build:
+      context: .
+      dockerfile: ./Dockerfile
