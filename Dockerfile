@@ -8,4 +8,4 @@ WORKDIR /code
 COPY src/ .
 
 # run en_predict on start
-CMD [ "python", "./en_predict.py" ]
+CMD [ "python", "./mewc_predict.py" ]

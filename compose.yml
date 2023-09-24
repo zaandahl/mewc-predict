@@ -1,6 +1,6 @@
 services:
   app:
-    image: zaandahl/en-predict
+    image: zaandahl/mewc-predict
     build:
       context: .
       dockerfile: ./Dockerfile
