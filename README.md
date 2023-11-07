@@ -15,7 +15,7 @@ VARIABLE=VALUE
 After installing Docker you can run the container using a command similar to the following. The `--env CUDA_VISIBLE_DEVICES=0` and `--gpus all` options allow you to take advantage of GPU accelerated training if your hardware supports it. Substitute `"$INPUT_DIR"` for your image directory that contains  and create a text file `"$ENV_FILE"` with any config options you wish to override. 
 
 ```
-docker pull zaandahl/mewc-predict:v1.0
+docker pull zaandahl/mewc-predict
 docker run --env CUDA_VISIBLE_DEVICES=0 --gpus all \ 
     --env-file "$ENV_FILE" \
     --interactive --tty --rm \
@@ -32,8 +32,8 @@ The following environment variables are supported for configuration (and their d
 | ---------|---------|------------ |
 | INPUT_DIR | "/images/" | A mounted point containing images to process - must match the Docker command above |
 | MD_FILE | "md_out.json" | MegaDetector output JSON file, must be located in INPUT_DIR |
-| EN_FILE | "en_out.pkl" | EfficientNetV2 output PKL file, must be located in INPUT_DIR |
-| EN_CSV | "en_out.csv" | CSV file containing EfficientNetV2 output, must be located in INPUT_DIR |
+| EN_FILE | "mewc_out.pkl" | EfficientNetV2 output PKL file, must be located in INPUT_DIR |
+| EN_CSV | "mewc_out.csv" | CSV file containing EfficientNetV2 output, must be located in INPUT_DIR |
 | RENAME_SNIPS | True | Rename snipped images to a random string of characters after processing |
 | SNIP_DIR | "snips" | A subdirectory under INPUT_DIR to find snipped images |
 | SNIP_CHARS | 16 | Number of random characters to use when renaming snipped images |

@@ -1,6 +1,6 @@
 INPUT_DIR: "/images/"
-EN_FILE: "en_out.pkl"
-EN_CSV: "en_out.csv"
+EN_FILE: "mewc_out.pkl"
+EN_CSV: "mewc_out.csv"
 RENAME_SNIPS: True
 SNIP_DIR: "snips"
 SNIP_CHARS: 16
