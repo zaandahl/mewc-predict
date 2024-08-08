@@ -1,6 +1,0 @@
-services:
-  app:
-    image: zaandahl/mewc-predict
-    build:
-      context: .
-      dockerfile: ./Dockerfile
