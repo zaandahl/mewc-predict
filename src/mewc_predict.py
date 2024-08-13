@@ -1,6 +1,5 @@
 import os, random, string
 import absl.logging
-# Suppress TensorFlow and absl logging
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 absl.logging.set_verbosity(absl.logging.ERROR)
 import pandas as pd
@@ -9,11 +8,10 @@ import tensorflow as tf
 
 from datetime import datetime
 from keras import saving
-from lib_common import read_yaml, model_img_size_mapping, configure_logging, update_config_from_env, setup_strategy
+from lib_common import read_yaml, model_img_size_mapping, update_config_from_env, setup_strategy
 from pathlib import Path
 from tqdm import tqdm 
 
-configure_logging() # Set env variable to allow INFO messages but supress WARNING messages
 config = update_config_from_env(read_yaml("config.yaml"))
 
 try:
