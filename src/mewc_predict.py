@@ -1,4 +1,8 @@
 import os, random, string
+import absl.logging
+# Suppress TensorFlow and absl logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+absl.logging.set_verbosity(absl.logging.ERROR)
 import pandas as pd
 os.environ["KERAS_BACKEND"] = "jax"
 import tensorflow as tf
