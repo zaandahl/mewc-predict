@@ -10,6 +10,19 @@ You can supply arguments via an environment file where the contents of that file
 VARIABLE=VALUE
 ```
 
+## Version 2 Updates
+
+The `mewc-predict` Docker image has been updated to version 2. Key updates include:
+
+- **Base Image**: Uses the new `mewc-flow` base image featuring `tensorflow/tensorflow:2.16.1-gpu`, `CUDA`, `cuDNN`, and `JAX`.
+- **Easy Model Selection**: Compatible with models trained using `mewc-train` v2.
+
+For users who wish to continue using version 1, the older Dockerfile and requirements can still be accessed by checking out the `v1.0.11` tag:
+
+```bash
+git checkout v1.0.11
+```
+
 ## Usage
 
 After installing Docker you can run the container using a command similar to the following. The `--env CUDA_VISIBLE_DEVICES=0` and `--gpus all` options allow you to take advantage of GPU accelerated training if your hardware supports it. Substitute `"$INPUT_DIR"` for your image directory that contains  and create a text file `"$ENV_FILE"` with any config options you wish to override. 
@@ -30,14 +43,24 @@ The following environment variables are supported for configuration (and their d
 
 | Variable | Default | Description |
 | ---------|---------|------------ |
+| MODEL | "ENS" | Model architecture: EN:[B0,B2,S,M,L,XL], CN:[P,N,T,S,B,L], ViT:[T,S,B,L] |
 | INPUT_DIR | "/images/" | A mounted point containing images to process - must match the Docker command above |
 | MD_FILE | "md_out.json" | MegaDetector output JSON file, must be located in INPUT_DIR |
-| EN_FILE | "mewc_out.pkl" | EfficientNetV2 output PKL file, must be located in INPUT_DIR |
-| EN_CSV | "mewc_out.csv" | CSV file containing EfficientNetV2 output, must be located in INPUT_DIR |
+| PRED_FILE | "mewc_out.pkl" | EfficientNetV2 output PKL file, must be located in INPUT_DIR |
+| PRED_CSV | "mewc_out.csv" | CSV file containing EfficientNetV2 output, must be located in INPUT_DIR |
 | RENAME_SNIPS | True | Rename snipped images to a random string of characters after processing |
 | SNIP_DIR | "snips" | A subdirectory under INPUT_DIR to find snipped images |
 | SNIP_CHARS | 16 | Number of random characters to use when renaming snipped images |
-| TARGET_SIZE | 240 | Target size for EfficientNetV2 input |
-| BATCH_SIZE | 256 | Batch size for EfficientNetV2 input |
+| BATCH_SIZE | 64 | Batch size for EfficientNetV2 input |
 | TOP_CLASSES | True | Output only top classes for each image |
 
+## GitHub Actions and DockerHub
+This project uses GitHub Actions to automate the build process and push the Docker image to DockerHub. You can find the image at:
+
+- [zaandahl/mewc-predict DockerHub Repository](https://hub.docker.com/repository/docker/zaandahl/mewc-predict)
+
+For users needing the older version, the v1.0.11 image is also available on DockerHub by using the appropriate tag:
+
+```bash
+docker pull zaandahl/mewc-predict:v1.0.11
+```
