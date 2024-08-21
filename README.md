@@ -47,14 +47,14 @@ The following environment variables are supported for configuration (and their d
 
 | Variable | Default | Description |
 | ---------|---------|------------ |
-| MODEL | "ENS" | Model architecture: EN:[B0,B2,S,M,L,XL], CN:[P,N,T,S,B,L], ViT:[T,S,B,L] |
+| MODEL | "ENB0" | Model architecture: EN:[B0,B2,S,M,L,XL], CN:[P,N,T,S,B,L], ViT:[T,S,B,L] |
 | INPUT_DIR | "/images/" | A mounted point containing images to process - must match the Docker command above |
 | PRED_FILE | "mewc_out.pkl" | EfficientNetV2 output PKL file, must be located in INPUT_DIR |
 | PRED_CSV | "mewc_out.csv" | CSV file containing EfficientNetV2 output, must be located in INPUT_DIR |
 | RENAME_SNIPS | True | Rename snipped images to a random string of characters after processing |
 | SNIP_DIR | "snips" | A subdirectory under INPUT_DIR to find snipped images |
 | SNIP_CHARS | 16 | Number of random characters to use when renaming snipped images |
-| BATCH_SIZE | 64 | Batch size for EfficientNetV2 input |
+| BATCH_SIZE | 16 | Batch size for EfficientNetV2 input |
 | TOP_CLASSES | True | Output only top classes for each image |
 
 ## GitHub Actions and DockerHub

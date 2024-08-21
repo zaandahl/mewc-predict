@@ -1,9 +1,9 @@
-MODEL: 'ENS'
+MODEL: 'ENB0'
 INPUT_DIR: '/images/'
 PRED_FILE: 'mewc_out.pkl'
 PRED_CSV: 'mewc_out.csv'
 RENAME_SNIPS: True
 SNIP_DIR: 'snips'
 SNIP_CHARS: 16
-BATCH_SIZE: 64
+BATCH_SIZE: 16
 TOP_CLASSES: True
