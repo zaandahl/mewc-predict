@@ -1,75 +1,69 @@
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-import random
-import string
+import os, random, string
+import absl.logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+absl.logging.set_verbosity(absl.logging.ERROR)
 import pandas as pd
+os.environ["KERAS_BACKEND"] = "jax"
 import tensorflow as tf
-import warnings
+
 from datetime import datetime
+from keras import saving
+from lib_common import read_yaml, model_img_size_mapping, update_config_from_env, setup_strategy
 from pathlib import Path
 from tqdm import tqdm 
-from tensorflow.keras.models import load_model
-from lib_common import read_yaml
-import tensorflow_addons as tfa
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
-warnings.simplefilter(action='ignore', category=Warning)
-
-config = read_yaml("config.yaml")
-for conf_key in config.keys():
-    if conf_key in os.environ:
-        config[conf_key] = os.environ[conf_key]
+config = update_config_from_env(read_yaml("config.yaml"))
 
 try:
-    class_map = read_yaml("class_list.yaml")
+    class_map = read_yaml('class_map.yaml')
 except Exception as e:
     print(e)
-    exit("ERROR: you must bind mount your class_list.yaml to /code/class_list.yaml")
+    exit("ERROR: you must bind mount your class-map file to /code/class_map.yaml")
 
 inv_class = {v: k for k, v in class_map.items()}
+img_size = model_img_size_mapping(config['MODEL']) # Get the image size for the model
 
 try:
-    gpus = tf.config.list_logical_devices('GPU')
-    print(gpus)
-    #strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
-    #with strategy.scope():
-    en_model = load_model("/code/model.h5",
-        custom_objects={'loss': tfa.losses.SigmoidFocalCrossEntropy()})
-    en_model.summary()
+    strategy = setup_strategy() # Set up the strategy for distributed inference
+    with strategy.scope():
+        print("Loading model...")
+        #model = saving.load_model("case_study_ENS_best.keras") # for local use
+        model = saving.load_model("/code/model.keras") # use this version for Docker
+    model.summary()
 except Exception as e:
     print(e) 
     exit("ERROR: you must bind mount your EfficientNet model to /code/model.h5")
 
 img_generator = tf.keras.preprocessing.image_dataset_from_directory(
-    config["INPUT_DIR"] + '/' + config["SNIP_DIR"], 
+    os.path.join(config["INPUT_DIR"], config["SNIP_DIR"]), 
     labels=None,
     label_mode=None,
     batch_size=int(config["BATCH_SIZE"]), 
-    image_size=(int(config["TARGET_SIZE"]), int(config["TARGET_SIZE"])),
+    image_size=(img_size, img_size),
     shuffle=False
 )
 
 try:
-    en_path = Path(config['INPUT_DIR'],config['EN_FILE'])
-    en_out = pd.read_pickle(en_path)
+    path = Path(config['INPUT_DIR'],config['PRED_FILE'])
+    model_out = pd.read_pickle(path)
     timestamp = '{:.%Y%m%d-%H%M%S}'.format(datetime.now())
-    en_out.to_pickle(Path(config['INPUT_DIR'],config['EN_FILE'] + timestamp))
-    en_out.to_csv(Path(config['INPUT_DIR'],config['EN_CSV'] + timestamp))
+    model_out.to_pickle(Path(config['INPUT_DIR'],config['PRED_FILE'] + timestamp))
+    model_out.to_csv(Path(config['INPUT_DIR'],config['PRED_CSV'] + timestamp))
 except Exception as e:
     print(e)
-    print("No existing en_out file found. Creating new one...")
-    en_out = pd.DataFrame()
+    print("No existing model-prediction file found. Creating new one...")
+    model_out = pd.DataFrame()
 
 file_paths = img_generator.file_paths
-filenames = list(map(lambda x : Path(x).name, file_paths)) # Path to extract just the filename
+filenames = list(map(lambda x : Path(x).name, file_paths))
 
 try:
-    filename_map = dict(zip(en_out['filename'], en_out['rand_name']))
+    filename_map = dict(zip(model_out['filename'], model_out['rand_name']))
 except:
     filename_map = None
 
-labels = list(map(lambda x : Path(x).parent.name, file_paths)) # Get the parent directory as the label
-preds = en_model.predict(img_generator) # get proba predictions
+labels = list(map(lambda x : Path(x).parent.name, file_paths))
+preds = model.predict(img_generator)
 
 class_ids = sorted(inv_class.values())
 class_names = [class_map.get(i,i)  for i in class_ids]
@@ -80,19 +74,16 @@ label_series = pd.Series(labels)
 pred_df.insert(0, "filename", file_series, True)
 pred_df.insert(1, "label", label_series, True)
 pred_df = pd.melt(pred_df, id_vars=['filename', 'label'], value_vars=class_ids, var_name="class_id", value_name="prob")
-# Add the class_name back 
 pred_df["class_name"] = pred_df["class_id"].replace(class_map)
-# Rank the class probabilities grouped by filename
 pred_df["class_rank"] = pred_df.groupby("filename")["prob"].rank("average", ascending=False)
 
 if filename_map is not None:
     inv_filename = {v: k for k, v in filename_map.items()}
     pred_df["rand_name"] = None
     pred_df = pred_df.replace({"filename": inv_filename})
-    # fill out rand_name by mapping from filename
     pred_df["rand_name"] = pred_df["filename"].replace(filename_map)
 
-if(config["RENAME_SNIPS"] == "True"):
+if(config["RENAME_SNIPS"] == True):
     print("Renaming snip files using " + str(config["SNIP_CHARS"]) + " alphanumeric characters...")
     pred_df["rand_name"] = ''
     for path in tqdm(Path(config["INPUT_DIR"],config["SNIP_DIR"]).iterdir()):
@@ -103,8 +94,8 @@ if(config["RENAME_SNIPS"] == "True"):
             pred_df.loc[pred_df['filename'] == path.name, 'rand_name'] = new_name
             path.rename(Path(directory,new_name))
 
-if(config["TOP_CLASSES"] == "True"):
+if(config["TOP_CLASSES"] == True):
     pred_df = pred_df[pred_df["class_rank"] == 1.0]
 
-pred_df.to_pickle(Path(config["INPUT_DIR"],config["EN_FILE"]))
-pred_df.to_csv(Path(config["INPUT_DIR"],config["EN_CSV"]))
+pred_df.to_pickle(Path(config["INPUT_DIR"],config["PRED_FILE"]))
+pred_df.to_csv(Path(config["INPUT_DIR"],config["PRED_CSV"]))
