@@ -3,6 +3,7 @@ import absl.logging
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 absl.logging.set_verbosity(absl.logging.ERROR)
 import pandas as pd
+pd.set_option('future.no_silent_downcasting', True)
 os.environ["KERAS_BACKEND"] = "jax"
 import tensorflow as tf
 
