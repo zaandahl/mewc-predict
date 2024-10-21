@@ -28,12 +28,12 @@ try:
     strategy = setup_strategy() # Set up the strategy for distributed inference
     with strategy.scope():
         print("Loading model...")
-        #model = saving.load_model("case_study_ENS_best.keras") # for local use
-        model = saving.load_model("/code/model.keras") # use this version for Docker
+        model = saving.load_model("/code/model.keras", compile=False)
+        model.trainable = False # Freeze the whole model for inference-only mode
     model.summary()
 except Exception as e:
     print(e) 
-    exit("ERROR: you must bind mount your EfficientNet model to /code/model.h5")
+    exit("ERROR: you must bind mount your classifier model to /code/model.keras")
 
 img_generator = tf.keras.preprocessing.image_dataset_from_directory(
     os.path.join(config["INPUT_DIR"], config["SNIP_DIR"]), 
