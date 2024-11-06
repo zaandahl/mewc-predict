@@ -29,7 +29,6 @@ try:
     with strategy.scope():
         print("Loading model...")
         model = saving.load_model("/code/model.keras", compile=False)
-        model.trainable = False # Freeze the whole model for inference-only mode
     model.summary()
 except Exception as e:
     print(e) 
