@@ -7,3 +7,24 @@ SNIP_DIR: 'snips'
 SNIP_CHARS: 16
 BATCH_SIZE: 16
 TOP_CLASSES: True
+
+# Inference behaviour
+# Use TensorFlow for inference; Keras 3 .keras models are backend-agnostic.
+KERAS_BACKEND: 'tensorflow'
+# Print `model.summary()` on load (can be slow for huge nets)
+PRINT_SUMMARY: False
+
+# Model loading controls
+# Path to a .keras model file (bind-mounted)
+MODEL_PATH: '/code/model.keras'
+# Prefer loading a TensorFlow SavedModel if a directory exists at MODEL_EXPORT_DIR
+USE_SAVEDMODEL: True
+# Location to mount/export a SavedModel directory (optional). If present and USE_SAVEDMODEL=True,
+# it will be staged to /tmp and loaded via tf.saved_model.load.
+MODEL_EXPORT_DIR: '/code/model_export'
+# Keras loader safe mode: keep True unless you need custom objects and want faster load
+SAFE_MODE: True
+
+# Control XLA JIT compilation. Options: 'auto' (default, let TF decide),
+# 'on' (force enable), 'off' (disable to avoid one-time compile overhead).
+XLA_JIT: 'auto'
