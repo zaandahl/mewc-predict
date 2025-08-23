@@ -7,5 +7,8 @@ WORKDIR /code
 # copy the src to the working directory
 COPY src/ .
 
+# Default to TensorFlow backend in the container
+ENV KERAS_BACKEND=tensorflow
+
 # run en_predict on start
 CMD [ "python", "./mewc_predict.py" ]

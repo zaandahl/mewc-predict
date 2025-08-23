@@ -40,6 +40,12 @@ docker run --env CUDA_VISIBLE_DEVICES=0 --gpus all \
     zaandahl/mewc-predict
 ```
 
+Optional SavedModel: if you export a TensorFlow SavedModel during training, you can mount the directory to `/code/model_export` and set nothing else. The container will prefer loading the SavedModel when that directory is present:
+
+```
+--volume "/path/to/exported_model_dir":/code/model_export \
+```
+
 ## Config Options
 
 The following environment variables are supported for configuration (and their default values are shown). Simply omit any variables you don't need to change and if you want to just use all defaults you can leave `--env-file $ENV_FILE` out of the command alltogether. 
@@ -56,6 +62,15 @@ The following environment variables are supported for configuration (and their d
 | SNIP_CHARS | 16 | Number of random characters to use when renaming snipped images |
 | BATCH_SIZE | 16 | Batch size for EfficientNetV2 input |
 | TOP_CLASSES | True | Output only top classes for each image |
+| USE_SAVEDMODEL | True | Prefer a TensorFlow SavedModel if found at `MODEL_EXPORT_DIR` |
+| MODEL_EXPORT_DIR | "/code/model_export" | Where to mount an exported SavedModel directory |
+| MODEL_PATH | "/code/model.keras" | Path to a mounted `.keras` file (staged to `/tmp` before load) |
+| SAFE_MODE | True | Keras safe loading; keep True unless measuring load-speed tradeoffs |
+| XLA_JIT | "auto" | XLA JIT control: "auto" (default), "on", or "off" |
+
+Notes:
+- XLA can introduce a one-time compile cost (you may see a log line like "Compiled cluster using XLA!"). For small, single-pass inference jobs, set `XLA_JIT=off` to avoid this overhead. For larger batches or repeated runs, `XLA_JIT=on` may help.
+- The model file is staged from `/code/model.keras` to `/tmp/model.keras` to avoid slow bind-mount I/O on Windows; this is intentional for faster startup.
 
 ## GitHub Actions and DockerHub
 This project uses GitHub Actions to automate the build process and push the Docker image to DockerHub. You can find the image at:
