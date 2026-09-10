@@ -114,6 +114,8 @@ def _axis_class_ids(names, class_ids):
 def crop_inventory(snip_root, prior_csv=None):
     """Authoritative new manifests; read-only recovery for historical random names."""
     root = Path(snip_root).resolve()
+    if not root.is_dir():
+        raise ValueError(f'Snip root must be an existing directory: {root}')
     disk = {}
     for path in root.rglob('*'):
         if path.suffix.lower() in IMAGE_EXTENSIONS and path.is_file():

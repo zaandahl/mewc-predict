@@ -56,6 +56,28 @@ def test_legacy_random_names_recovered_without_renaming(tmp_path):
     assert (tmp_path/'random123.jpg').read_bytes() == b'original crop bytes'
 
 
+@pytest.mark.parametrize('root_kind', ['missing', 'deleted', 'file'])
+def test_legacy_empty_inventory_requires_an_existing_snip_directory(tmp_path, root_kind):
+    snip_root = tmp_path / 'snips'
+    if root_kind == 'deleted':
+        snip_root.mkdir()
+        snip_root.rmdir()
+    if root_kind == 'file':
+        snip_root.write_bytes(b'not a directory')
+    prior_csv = tmp_path / 'previous.csv'
+    pd.DataFrame(columns=['filename', 'rand_name']).to_csv(prior_csv, index=False)
+    with pytest.raises(ValueError, match='existing directory'):
+        crop_inventory(snip_root, prior_csv)
+
+
+def test_empty_existing_legacy_inventory_remains_valid(tmp_path):
+    prior_csv = tmp_path / 'previous.csv'
+    pd.DataFrame(columns=['filename', 'rand_name']).to_csv(prior_csv, index=False)
+    rows, mode = crop_inventory(tmp_path, prior_csv)
+    assert rows == []
+    assert mode == 'legacy-csv-recovery'
+
+
 @pytest.mark.parametrize('damage',['missing','extra','duplicate','incomplete','traversal'])
 def test_crop_manifest_rejects_unaccounted_or_unsafe_inventory(tmp_path,damage):
     crops(tmp_path,[record()])
@@ -261,6 +283,48 @@ def test_empty_runtime_validates_declaration_but_never_imports_or_loads_model(tm
     bundle.write_text(json.dumps({'schema_version':1,**declaration,'model_sha256':'wrong'}))
     with pytest.raises(ValueError,match='model_sha256'): run(config)
     assert json.loads((tmp_path/'prediction_manifest.json').read_text())['complete'] is False
+
+
+@pytest.mark.parametrize('manifest_text', ['', 'null\n'])
+def test_supplied_empty_or_null_model_manifest_fails_with_contiguous_classmap(tmp_path, manifest_text):
+    snips = tmp_path / 'snips'
+    snips.mkdir()
+    (snips / 'crop_manifest.json').write_text(
+        json.dumps({'schema_version': 1, 'complete': True, 'crops': []}))
+    class_path = tmp_path / 'classes.yaml'
+    class_path.write_text('0: quoll\n1: devil\n')
+    model_path = tmp_path / 'model.keras'
+    model_path.write_bytes(b'fixture frozen artifact')
+    bundle = tmp_path / 'bundle.yaml'
+    bundle.write_text(manifest_text)
+    config = load_config(Path(__file__).parents[1] / 'src/config.yaml')
+    config.update(INPUT_DIR=str(tmp_path), MODEL='VTL', MODEL_PATH=str(model_path),
+                  CLASS_MAP_PATH=str(class_path), MODEL_MANIFEST_PATH=str(bundle),
+                  USE_SAVEDMODEL=False)
+    with pytest.raises(ValueError, match='explicit class_ids'):
+        run(config)
+
+
+def test_empty_model_manifest_path_preserves_no_manifest_mode(tmp_path, monkeypatch):
+    snips = tmp_path / 'snips'
+    snips.mkdir()
+    (snips / 'crop_manifest.json').write_text(
+        json.dumps({'schema_version': 1, 'complete': True, 'crops': []}))
+    class_path = tmp_path / 'classes.yaml'
+    class_path.write_text('0: quoll\n1: devil\n')
+    model_path = tmp_path / 'model.keras'
+    model_path.write_bytes(b'fixture frozen artifact')
+    config = load_config(Path(__file__).parents[1] / 'src/config.yaml')
+    config.update(INPUT_DIR=str(tmp_path), MODEL='VTL', MODEL_PATH=str(model_path),
+                  CLASS_MAP_PATH=str(class_path), MODEL_MANIFEST_PATH='',
+                  USE_SAVEDMODEL=False)
+    monkeypatch.setattr('mewc_predict._infer',
+                        lambda *args: pytest.fail('empty run must not load the model'))
+    run(config)
+    manifest = json.loads((tmp_path / 'prediction_manifest.json').read_text())
+    assert manifest['complete'] is True
+    assert manifest['crop_count'] == 0
+    assert manifest['model_contract']['class_ids'] == [0, 1]
 
 
 def test_score_archive_preserves_full_matrix_dtype_and_order(tmp_path):

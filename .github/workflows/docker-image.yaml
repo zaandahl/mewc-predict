@@ -12,7 +12,7 @@ on:
         default: false
         type: boolean
       parent_image:
-        description: 'Fixed parent image including sha256 digest (matching source lock)'
+        description: 'Published parent digest recorded in release-parent.json'
         required: true
         type: string
 permissions:
@@ -32,7 +32,18 @@ jobs:
           set -euo pipefail
           [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           IMAGE="$REPOSITORY:${VERSION#v}"
-          [[ "$PARENT_IMAGE" =~ ^[a-zA-Z0-9._:/-]+@sha256:[a-f0-9]{64}$ ]]
+          python - <<'PYTHON'
+          import json, os, re
+          with open('release-parent.json', encoding='utf-8') as stream:
+              lock = json.load(stream)
+          parent = os.environ['PARENT_IMAGE']
+          expected_repository = 'zaandahl/mewc-flow'
+          if (lock.get('repository') != expected_repository
+                  or not re.fullmatch(re.escape(expected_repository) + r'@sha256:[a-f0-9]{64}', parent)
+                  or lock.get('image') != parent
+                  or not re.fullmatch(r'[a-f0-9]{40}', lock.get('source_commit', ''))):
+              raise SystemExit('Parent must match the reviewed release-parent.json; record its verified published digest first')
+          PYTHON
           docker build --build-arg MEWC_FLOW_BASE="$PARENT_IMAGE" --tag "$IMAGE" .
           docker image inspect "$IMAGE" --format '{{.Id}}'
       - name: Publish after explicit dispatch choice

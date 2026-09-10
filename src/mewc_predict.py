@@ -82,9 +82,12 @@ def _run(config, root):
     class_hash = sha256_path(class_path)
     class_map = read_yaml(class_path)
     manifest_path = config['MODEL_MANIFEST_PATH']
-    bundle = read_yaml(manifest_path) if manifest_path else None
-    if bundle is not None and (not isinstance(bundle, dict) or 'class_ids' not in bundle):
-        raise ValueError('Model bundle manifest requires an explicit class_ids array')
+    if manifest_path:
+        bundle = read_yaml(manifest_path)
+        if bundle is None or not isinstance(bundle, dict) or 'class_ids' not in bundle:
+            raise ValueError('Model bundle manifest requires an explicit class_ids array')
+    else:
+        bundle = None
     class_ids = class_ids_in_order(class_map, bundle['class_ids'] if bundle is not None else None)
     names = class_names_in_order(class_map, class_ids)
     if class_hash != sha256_path(class_path):

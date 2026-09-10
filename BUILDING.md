@@ -25,3 +25,14 @@ then update the deployment image lock with the returned registry digests.
 
 Public tests use synthetic inputs and mocked ML dispatch. Actual inference and
 private-model comparisons are documented in the integration validation record.
+
+Manual release builds (including build-only dispatches) require an exact match to
+`release-parent.json`, restricted to the declared `zaandahl` parent repository.
+The `image` field is deliberately unset because this review has local image IDs,
+not published registry digests. After publishing the parent from `source_commit`,
+a maintainer must verify its provenance and commit its `repository@sha256` digest
+to this lock before dispatching a child release. Digest syntax alone is insufficient.
+This approval record does not independently attest how the parent was built.
+
+For Compose builds, export `MEWC_FLOW_BASE` with the fixed parent
+used by the source builder, then run `docker compose build`. The variable is required.

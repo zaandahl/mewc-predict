@@ -3,3 +3,5 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
+      args:
+        MEWC_FLOW_BASE: ${MEWC_FLOW_BASE:?Set the fixed parent image from the generated image lock}
