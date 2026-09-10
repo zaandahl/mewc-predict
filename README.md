@@ -66,7 +66,7 @@ The following environment variables are supported for configuration (and their d
 | MODEL_PATH | "/code/model.keras" | Path to a mounted `.keras` file (staged to `/tmp` before load) |
 | SAFE_MODE | True | Keras safe loading; keep True unless measuring load-speed tradeoffs |
 | XLA_JIT | "auto" | XLA JIT control: "auto" (default), "on", or "off" |
-| CLASS_MAP_PATH | "/code/class_map.yaml" | Class map with unique names and contiguous integer indices starting at zero |
+| CLASS_MAP_PATH | "/code/class_map.yaml" | Class map with unique stable class codes and names; noncontiguous/string codes require a declared axis mapping |
 | MODEL_MANIFEST_PATH | "" | Optional YAML or JSON model bundle contract, described below |
 
 Notes:
@@ -102,10 +102,12 @@ not certify loaded-model shapes. Nonempty successful runs set
 
 The output CSV retains `filename`, `rand_name`, `label`, `class_id`, `prob`,
 `class_name`, and `class_rank`, and adds `crop_id`, `source_file`, and
-`detection_index`. `filename` is the original crop identity; `rand_name` is
+`detection_index`, plus `class_index` (the zero-based model output axis).
+`class_id` retains the original class-map code; it is never replaced by an
+axis index. `filename` is the original crop identity; `rand_name` is
 its actual relative on-disk path, unchanged by prediction. Source/detection
 keys distinguish identical basenames in different folders. All exactly tied
-maximum scores survive `TOP_CLASSES=True`, in class-index order. Ranks use
+maximum scores survive `TOP_CLASSES=True`, in output-axis order. Ranks use
 competition ranking (1, 1, 3 for two tied maxima); no class is chosen to
 break a tie. `prob` remains the model output score without recalibration.
 
@@ -119,10 +121,11 @@ A lost/ambiguous historical mapping fails explicitly; it is never guessed.
 `RENAME_SNIPS=True` and the obsolete `SNIP_CHARS` environment option are errors.
 
 `prediction_scores.npz` retains the complete unmodified model score matrix,
-even when `TOP_CLASSES=True` filters the tables. It contains three arrays:
+even when `TOP_CLASSES=True` filters the tables. It contains four arrays:
 `probabilities` (original numeric dtype and values, crops by classes),
 `crop_ids` (ordered Unicode row identities), and `class_order` (ordered Unicode
-class names). It uses no object arrays and can be read with
+class names), and `class_ids` (ordered original codes, Unicode for string codes
+or int64 for integer codes). It uses no object arrays and can be read with
 `numpy.load(path, allow_pickle=False)`. Empty runs store a `(0, N)` matrix.
 Consumers can regenerate the expected CSV/PKL table from this archive and the
 crop manifest to verify row completeness, class order, values, and ties.
@@ -142,11 +145,26 @@ signature after partial predictions have accumulated.
 
 ## Model preflight and provenance
 
-Class indices must be unique integers exactly `0..N-1`, and class names must
-be unique nonempty strings. Duplicate YAML keys are rejected. Class order is
-explicitly the order of those indices; without training/export evidence this
-checks internal consistency but cannot establish the historical training label
-order. For nonempty inventories, every loaded model must expose one
+Class-map keys are stable class codes, not necessarily model output indices.
+They must be uniformly nonnegative int64 integers or canonical decimal strings
+(without leading-zero aliases), and names must be unique nonempty strings.
+Duplicate YAML keys, mixed code types, aliases, and duplicate names are rejected.
+String codes and noncontiguous integer codes require an explicit manifest
+`class_ids` array giving the original code at each output axis. It must cover
+the original map exactly without coercion. `class_order` gives the corresponding
+names in that same axis order and must agree with the map. A supplied manifest
+must include `class_ids`; without a manifest only integer keys exactly
+`0..N-1` retain their established default axis order.
+
+The historical predictor sorted string codes lexically, so a code set such as
+`"0", "10", "2", "999"` must explicitly declare that order to reproduce its
+mapping. It must not be numerically sorted or relabelled as indices. This binds
+the declared mapping but does not establish training/export label provenance.
+Use `class_order_provenance: historical-predictor-lexical-order-unverified` when
+that is the available evidence; the completion record preserves this provenance
+and its limitation. `training-export-verified` is reserved for a declaration
+supported by the training/export record. Without a provenance declaration,
+supplied order remains `declared-unverified`. For nonempty inventories, every loaded model must expose one
 dynamic-batch, fixed-size RGB float32 input
 and one output with `N` columns. SavedModel dispatch is resolved before
 inference from `serving_default`, or the sole available signature. Ambiguous
@@ -171,7 +189,9 @@ schema_version: 1
 architecture: VTL
 model_sha256: <SHA256 of the mounted model file>
 class_map_sha256: <SHA256 of the exact class-map file>
-class_order: [class_at_index_0, class_at_index_1]
+class_ids: ["0", "10", "2", "999"]
+class_order: [class_at_code_0, class_at_code_10, class_at_code_2, class_at_code_999]
+class_order_provenance: historical-predictor-lexical-order-unverified
 input_shape: [null, 384, 384, 3]
 preprocessing:
   color_mode: rgb
@@ -182,8 +202,10 @@ preprocessing:
   dtype: float32
 ```
 
-Every field is checked before inference; class order must come from the
-training/export record, not a new scientific assumption. The preprocessing
+Every mapping and contract field is checked before inference. Declare only the
+order supported by the available training/export or historical predictor
+record, and record which evidence supports it; do not invent or silently change
+class identities. The preprocessing
 contract records the established image loader: RGB, bilinear resize, float32
 0–255 pixels and no external normalization. Preprocessing embedded within a
 serialized model stays intact. File hashes bind exact bytes; a SavedModel

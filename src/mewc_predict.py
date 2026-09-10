@@ -10,7 +10,7 @@ from pathlib import Path
 os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')
 from lib_common import read_yaml, model_img_size_mapping, update_config_from_env
 from prediction_contract import (
-    PREPROCESSING, atomic_json, class_names_in_order, crop_inventory,
+    PREPROCESSING, atomic_json, class_names_in_order, class_ids_in_order, crop_inventory,
     predict_batches, prediction_table, safe_relative, savedmodel_dispatch,
     sha256_path, validate_bundle, validate_shapes, write_predictions, write_prediction_scores,
 )
@@ -80,16 +80,20 @@ def _run(config, root):
     size = model_img_size_mapping(config['MODEL'])
     class_path = Path(config['CLASS_MAP_PATH'])
     class_hash = sha256_path(class_path)
-    names = class_names_in_order(read_yaml(class_path))
+    class_map = read_yaml(class_path)
+    manifest_path = config['MODEL_MANIFEST_PATH']
+    bundle = read_yaml(manifest_path) if manifest_path else None
+    if bundle is not None and (not isinstance(bundle, dict) or 'class_ids' not in bundle):
+        raise ValueError('Model bundle manifest requires an explicit class_ids array')
+    class_ids = class_ids_in_order(class_map, bundle['class_ids'] if bundle is not None else None)
+    names = class_names_in_order(class_map, class_ids)
     if class_hash != sha256_path(class_path):
         raise ValueError('Class map changed during preflight')
     inventory, identity_mode = crop_inventory(root / config['SNIP_DIR'], root / config['PRED_CSV'])
     saved = config['USE_SAVEDMODEL'] and Path(config['MODEL_EXPORT_DIR']).is_dir()
     source = Path(config['MODEL_EXPORT_DIR'] if saved else config['MODEL_PATH'])
     model_hash = sha256_path(source)
-    manifest_path = config['MODEL_MANIFEST_PATH']
-    bundle = read_yaml(manifest_path) if manifest_path else None
-    model_contract, limitations = validate_bundle(bundle, config['MODEL'], names, model_hash, class_hash, size)
+    model_contract, limitations = validate_bundle(bundle, config['MODEL'], names, model_hash, class_hash, size, class_ids)
     if identity_mode != 'crop-manifest-v1':
         limitations.append('Historical random-name recovery has no verified source/detection association; regenerate crops for the current pipeline.')
     if inventory:
@@ -99,7 +103,7 @@ def _run(config, root):
         # eligible crops there is no reason to import or deserialize the model.
         predictions = predict_batches(None, [], 0, len(names))
         limitations.append('Model loading and runtime input/output shape validation skipped: no eligible crops.')
-    table = prediction_table(predictions, inventory, names, config['TOP_CLASSES'])
+    table = prediction_table(predictions, inventory, names, config['TOP_CLASSES'], class_ids)
     pickle_path, csv_path = root / config['PRED_FILE'], root / config['PRED_CSV']
     scores_path = root / 'prediction_scores.npz'
     for path in (pickle_path, csv_path, scores_path):
@@ -108,7 +112,7 @@ def _run(config, root):
             backup = path.with_name(path.name + '.previous.' + sha256_path(path))
             if not backup.exists():
                 shutil.copyfile(path, backup)
-    write_prediction_scores(scores_path, predictions, inventory, names)
+    write_prediction_scores(scores_path, predictions, inventory, names, class_ids)
     write_predictions(table, pickle_path, csv_path)
     return {'identity_mode': identity_mode, 'crop_count': len(inventory),
             'crop_manifest_sha256': sha256_path(root / config['SNIP_DIR'] / 'crop_manifest.json') if identity_mode == 'crop-manifest-v1' else None,

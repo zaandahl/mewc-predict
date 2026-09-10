@@ -59,19 +59,56 @@ def safe_relative(value):
     return value
 
 
-def class_names_in_order(class_map):
+def _validate_class_codes(codes):
+    if not codes:
+        raise ValueError('Class codes must be nonempty')
+    kinds = {type(code) for code in codes}
+    if kinds == {str}:
+        # Canonical decimal strings prevent aliases such as "01" and "1".
+        if any(not code.isascii() or not code.isdecimal() or str(int(code)) != code for code in codes):
+            raise ValueError('String class codes must be canonical nonnegative decimal codes without aliases')
+    elif kinds == {int}:
+        if any(code < 0 or code > np.iinfo(np.int64).max for code in codes):
+            raise ValueError('Integer class codes must be nonnegative int64 values')
+    else:
+        raise ValueError('Class codes must be uniformly strings or integers; mixed types and booleans are invalid')
+    if len(set(codes)) != len(codes):
+        raise ValueError('Class codes must be unique')
+    return codes
+
+
+def class_ids_in_order(class_map, class_ids=None):
+    """Resolve model axes to original class codes without relabelling them."""
     if not isinstance(class_map, dict) or not class_map:
-        raise ValueError('Class map must be a nonempty mapping of integer indices to names')
-    if any(type(key) is not int for key in class_map):
-        raise ValueError('Class indices must be integers')
-    if sorted(class_map) != list(range(len(class_map))):
-        raise ValueError('Class indices must be contiguous and zero-based')
-    names = [class_map[i] for i in range(len(class_map))]
+        raise ValueError('Class map must be a nonempty mapping of class codes to names')
+    codes = _validate_class_codes(list(class_map))
+    if class_ids is None:
+        if type(codes[0]) is not int or sorted(codes) != list(range(len(codes))):
+            raise ValueError('String or noncontiguous class codes require explicit model manifest class_ids')
+        return list(range(len(codes)))
+    if not isinstance(class_ids, list):
+        raise ValueError('Model manifest class_ids must be an ordered array')
+    _validate_class_codes(class_ids)
+    if type(class_ids[0]) is not type(codes[0]) or set(class_ids) != set(codes):
+        raise ValueError('Model manifest class_ids must exactly cover the original class-map codes without coercion')
+    return list(class_ids)
+
+
+def class_names_in_order(class_map, class_ids=None):
+    codes = class_ids_in_order(class_map, class_ids)
+    names = [class_map[code] for code in codes]
     if any(not isinstance(name, str) or not name.strip() for name in names):
         raise ValueError('Class names must be nonempty strings')
     if len(set(names)) != len(names):
         raise ValueError('Class names must be unique')
     return names
+
+
+def _axis_class_ids(names, class_ids):
+    codes = list(range(len(names))) if class_ids is None else class_ids
+    if not isinstance(codes, list) or len(codes) != len(names):
+        raise ValueError('Class ID count must match output-axis names')
+    return _validate_class_codes(codes)
 
 
 def crop_inventory(snip_root, prior_csv=None):
@@ -196,7 +233,8 @@ def predict_batches(dispatch, batches, expected_rows, classes):
     return validate_predictions(output, expected_rows, classes)
 
 
-def prediction_table(predictions, inventory, names, top_only):
+def prediction_table(predictions, inventory, names, top_only, class_ids=None):
+    codes = _axis_class_ids(names, class_ids)
     values = validate_predictions(predictions, len(inventory), len(names))
     records = []
     for crop, scores in zip(inventory, values):
@@ -206,31 +244,39 @@ def prediction_table(predictions, inventory, names, top_only):
             rank = 1 + int(np.count_nonzero(scores > score))
             if not top_only or rank == 1:
                 records.append({**crop, 'label': str(PurePosixPath(crop['rand_name']).parent),
-                                'class_id': index, 'prob': float(score),
+                                'class_id': codes[index], 'class_index': index, 'prob': float(score),
                                 'class_name': names[index], 'class_rank': rank})
     columns = ['crop_id', 'filename', 'rand_name', 'source_file', 'detection_index',
-               'label', 'class_id', 'prob', 'class_name', 'class_rank']
+               'label', 'class_id', 'class_index', 'prob', 'class_name', 'class_rank']
     table = pd.DataFrame(records, columns=columns)
     if len(inventory) and table['crop_id'].nunique() != len(inventory):
         raise ValueError('Output failed to account for every input crop')
     return table
 
 
-def validate_bundle(manifest, architecture, names, model_hash, class_hash, size):
-    expected = {'architecture': canonical_model_name(architecture), 'class_order': names,
+def validate_bundle(manifest, architecture, names, model_hash, class_hash, size, class_ids=None):
+    codes = _axis_class_ids(names, class_ids)
+    expected = {'architecture': canonical_model_name(architecture), 'class_order': names, 'class_ids': codes,
                 'model_sha256': model_hash, 'class_map_sha256': class_hash,
                 'input_shape': [None, size, size, 3], 'preprocessing': PREPROCESSING}
     if manifest is None:
         return expected, ['Training/export class order and architecture provenance unverified: no model bundle manifest supplied.']
     if not isinstance(manifest, dict) or manifest.get('schema_version') != 1:
         raise ValueError('Unsupported model bundle manifest')
+    _axis_class_ids(names, manifest.get('class_ids'))
     for key, value in expected.items():
         actual = manifest.get(key)
         if key == 'architecture' and actual is not None:
             actual = canonical_model_name(actual)
         if actual != value:
             raise ValueError(f'Model bundle {key} mismatch: expected {value!r}, received {actual!r}')
-    return expected, []
+    provenance = manifest.get('class_order_provenance', 'declared-unverified')
+    if not isinstance(provenance, str) or not provenance.strip():
+        raise ValueError('class_order_provenance must be a nonempty string')
+    expected['class_order_provenance'] = provenance
+    limitations = [] if provenance == 'training-export-verified' else [
+        'Class order follows the supplied axis/code declaration; training/export order provenance is unverified.']
+    return expected, limitations
 
 
 def write_predictions(table, pickle_path, csv_path):
@@ -255,8 +301,9 @@ def write_predictions(table, pickle_path, csv_path):
                 os.unlink(name)
 
 
-def write_prediction_scores(path, predictions, inventory, names):
+def write_prediction_scores(path, predictions, inventory, names, class_ids=None):
     """Persist all unmodified scores and their exact row/column identities."""
+    codes = _axis_class_ids(names, class_ids)
     values = validate_predictions(predictions, len(inventory), len(names))
     path = Path(path)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.' + path.name + '.')
@@ -264,7 +311,8 @@ def write_prediction_scores(path, predictions, inventory, names):
         with os.fdopen(fd, 'wb') as stream:
             np.savez_compressed(stream, probabilities=values,
                                 crop_ids=np.asarray([row['crop_id'] for row in inventory], dtype=str),
-                                class_order=np.asarray(names, dtype=str))
+                                class_order=np.asarray(names, dtype=str),
+                                class_ids=np.asarray(codes, dtype=str if type(codes[0]) is str else np.int64))
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

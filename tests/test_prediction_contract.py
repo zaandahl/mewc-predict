@@ -132,7 +132,7 @@ def test_model_bundle_binds_shapes_class_order_preprocessing_and_hashes(tmp_path
     expected,limitations=validate_bundle(None,'VTL',['a','b'],checksum,'classhash',384)
     assert limitations
     bundle={'schema_version':1,**expected}
-    assert validate_bundle(bundle,'ViTL',['a','b'],checksum,'classhash',384)[1] == []
+    assert 'unverified' in validate_bundle(bundle,'ViTL',['a','b'],checksum,'classhash',384)[1][0]
     for key,value in [('architecture','ENS'),('class_order',['b','a']),('model_sha256','bad'),
                       ('class_map_sha256','bad'),('input_shape',[None,224,224,3]),('preprocessing',{})]:
         with pytest.raises(ValueError,match=key):
@@ -303,3 +303,113 @@ def test_probability_conservation_accepts_float32_roundoff_and_empty_rows():
     probabilities=np.array([[.33333334,.33333334,.33333334]],dtype=np.float32)
     assert validate_predictions(probabilities,1,3) is probabilities
     assert validate_predictions(np.empty((0,3)),0,3).shape==(0,3)
+
+
+
+def test_explicit_lexical_class_codes_preserve_axis_mapping_ranks_and_archive(tmp_path):
+    from prediction_contract import class_ids_in_order, write_prediction_scores
+    mapping={'999':'bait','2':'quoll','0':'blank','10':'devil'}
+    codes=['0','10','2','999']
+    names=class_names_in_order(mapping,codes)
+    assert names==['blank','devil','quoll','bait']
+    assert class_ids_in_order(mapping,codes)==codes
+    inventory=[{'crop_id':'camera/img-0.jpg','filename':'camera/img-0.jpg',
+                'rand_name':'camera/img-0.jpg','source_file':'camera/img.jpg','detection_index':0}]
+    probabilities=np.array([[.1,.6,.1,.2]],dtype=np.float32)
+    table=prediction_table(probabilities,inventory,names,True,codes)
+    assert table.class_id.tolist()==['10']
+    assert table.class_index.tolist()==[1]
+    assert table.class_name.tolist()==['devil']
+    assert table.class_rank.tolist()==[1]
+    path=tmp_path/'scores.npz'
+    write_prediction_scores(path,probabilities,inventory,names,codes)
+    with np.load(path,allow_pickle=False) as archive:
+        assert archive['class_ids'].dtype.kind=='U'
+        assert archive['class_ids'].tolist()==codes
+        np.testing.assert_array_equal(archive['probabilities'],probabilities)
+    tied=prediction_table([[.05,.45,.05,.45]],inventory,names,True,codes)
+    assert tied.class_id.tolist()==['10','999']
+    assert tied.class_index.tolist()==[1,3]
+    assert tied.class_rank.tolist()==[1,1]
+    write_predictions(table,tmp_path/'out.pkl',tmp_path/'out.csv')
+    assert pd.read_csv(tmp_path/'out.csv',dtype={'class_id':str}).class_id.tolist()==['10']
+    assert pd.read_pickle(tmp_path/'out.pkl').class_id.tolist()==['10']
+
+
+@pytest.mark.parametrize('mapping,codes',[
+    ({'0':'a','10':'b'},None),
+    ({0:'a',10:'b'},None),
+    ({'0':'a','10':'b'},['0','0']),
+    ({'0':'a','10':'b'},['0','2']),
+    ({'0':'a','10':'b'},[0,10]),
+    ({0:'a',10:'b'},['0','10']),
+    ({'0':'a',10:'b'},['0',10]),
+    ({'01':'a','1':'b'},['01','1']),
+    ({-1:'a',0:'b'},[-1,0]),
+    ({0:'a',1:'b'},[False,True]),
+    ({'0':'a','10':'a'},['0','10']),
+])
+def test_ambiguous_incomplete_or_coerced_class_code_orders_fail(mapping,codes):
+    with pytest.raises(ValueError): class_names_in_order(mapping,codes)
+
+
+def test_noncontiguous_integer_codes_and_explicit_reordered_axes(tmp_path):
+    from prediction_contract import write_prediction_scores
+    codes=[999,10,0]
+    names=class_names_in_order({0:'blank',10:'devil',999:'bait'},codes)
+    assert names==['bait','devil','blank']
+    path=tmp_path/'scores.npz'
+    write_prediction_scores(path,[[.2,.7,.1]],[{'crop_id':'a.jpg'}],names,codes)
+    with np.load(path,allow_pickle=False) as archive:
+        assert archive['class_ids'].dtype==np.dtype('int64')
+        assert archive['class_ids'].tolist()==codes
+
+
+def test_declared_codes_must_agree_with_names_and_preserve_provenance():
+    codes=['0','10','2','999']
+    names=['blank','devil','quoll','bait']
+    expected,_=validate_bundle(None,'VTL',names,'modelhash','classhash',384,codes)
+    bundle={'schema_version':1,**expected,'class_order_provenance':'historical-predictor-lexical-order-unverified'}
+    contract,limitations=validate_bundle(bundle,'VTL',names,'modelhash','classhash',384,codes)
+    assert contract['class_ids']==codes
+    assert contract['class_order_provenance']==bundle['class_order_provenance']
+    assert limitations and 'unverified' in limitations[0]
+    with pytest.raises(ValueError,match='class_order'):
+        validate_bundle({**bundle,'class_order':['blank','quoll','devil','bait']},'VTL',names,'modelhash','classhash',384,codes)
+    with pytest.raises(ValueError,match='class_ids'):
+        validate_bundle({**bundle,'class_ids':['0','2','10','999']},'VTL',names,'modelhash','classhash',384,codes)
+
+
+def test_runtime_uses_declared_string_codes_without_relabelling(tmp_path,monkeypatch):
+    snips=tmp_path/'snips'; snips.mkdir()
+    crops(snips,[record()])
+    class_path=tmp_path/'classes.yaml'
+    class_path.write_text("'999': bait\n'2': quoll\n'0': blank\n'10': devil\n")
+    model_path=tmp_path/'model.keras'; model_path.write_bytes(b'frozen fixture')
+    codes=['0','10','2','999']; names=['blank','devil','quoll','bait']
+    contract,_=validate_bundle(None,'VTL',names,sha256_path(model_path),sha256_path(class_path),384,codes)
+    bundle=tmp_path/'bundle.json'
+    bundle.write_text(json.dumps({'schema_version':1,**contract,'class_order_provenance':'historical-predictor-lexical-order-unverified'}))
+    config=load_config(Path(__file__).parents[1]/'src/config.yaml')
+    config.update(INPUT_DIR=str(tmp_path),MODEL='VTL',MODEL_PATH=str(model_path),
+                  CLASS_MAP_PATH=str(class_path),MODEL_MANIFEST_PATH=str(bundle),USE_SAVEDMODEL=False)
+    calls=[]
+    def infer(config,root,inventory,actual_names,*args):
+        calls.append(actual_names)
+        return np.array([[.1,.6,.1,.2]],dtype=np.float32)
+    monkeypatch.setattr('mewc_predict._infer',infer)
+    run(config)
+    manifest=json.loads((tmp_path/'prediction_manifest.json').read_text())
+    assert calls==[names]
+    assert manifest['complete'] is True
+    assert manifest['model_contract']['class_ids']==codes
+    assert any('unverified' in item for item in manifest['limitations'])
+    table=pd.read_pickle(tmp_path/'mewc_out.pkl')
+    assert table.class_id.tolist()==['10']
+    assert table.class_index.tolist()==[1]
+    with np.load(tmp_path/'prediction_scores.npz',allow_pickle=False) as archive:
+        assert archive['class_ids'].tolist()==codes
+    # Omitting the declaration cannot silently infer lexical or numeric order.
+    config['MODEL_MANIFEST_PATH']=''
+    with pytest.raises(ValueError,match='explicit model manifest class_ids'): run(config)
+    assert calls==[names]
