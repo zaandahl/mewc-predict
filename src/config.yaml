@@ -2,9 +2,8 @@ MODEL: 'ENB0'
 INPUT_DIR: '/images/'
 PRED_FILE: 'mewc_out.pkl'
 PRED_CSV: 'mewc_out.csv'
-RENAME_SNIPS: True
+RENAME_SNIPS: False
 SNIP_DIR: 'snips'
-SNIP_CHARS: 16
 BATCH_SIZE: 16
 TOP_CLASSES: True
 
@@ -28,3 +27,7 @@ SAFE_MODE: True
 # Control XLA JIT compilation. Options: 'auto' (default, let TF decide),
 # 'on' (force enable), 'off' (disable to avoid one-time compile overhead).
 XLA_JIT: 'auto'
+
+# Model provenance: optional bundle manifest; hashes/config are always recorded.
+CLASS_MAP_PATH: '/code/class_map.yaml'
+MODEL_MANIFEST_PATH: ''

@@ -57,9 +57,8 @@ The following environment variables are supported for configuration (and their d
 | INPUT_DIR | "/images/" | A mounted point containing images to process - must match the Docker command above |
 | PRED_FILE | "mewc_out.pkl" | EfficientNetV2 output PKL file, must be located in INPUT_DIR |
 | PRED_CSV | "mewc_out.csv" | CSV file containing EfficientNetV2 output, must be located in INPUT_DIR |
-| RENAME_SNIPS | True | Rename snipped images to a random string of characters after processing |
+| RENAME_SNIPS | False | Must remain False; prediction never renames crop files |
 | SNIP_DIR | "snips" | A subdirectory under INPUT_DIR to find snipped images |
-| SNIP_CHARS | 16 | Number of random characters to use when renaming snipped images |
 | BATCH_SIZE | 16 | Batch size for EfficientNetV2 input |
 | TOP_CLASSES | True | Output only top classes for each image |
 | USE_SAVEDMODEL | True | Prefer a TensorFlow SavedModel if found at `MODEL_EXPORT_DIR` |
@@ -67,10 +66,12 @@ The following environment variables are supported for configuration (and their d
 | MODEL_PATH | "/code/model.keras" | Path to a mounted `.keras` file (staged to `/tmp` before load) |
 | SAFE_MODE | True | Keras safe loading; keep True unless measuring load-speed tradeoffs |
 | XLA_JIT | "auto" | XLA JIT control: "auto" (default), "on", or "off" |
+| CLASS_MAP_PATH | "/code/class_map.yaml" | Class map with unique names and contiguous integer indices starting at zero |
+| MODEL_MANIFEST_PATH | "" | Optional YAML or JSON model bundle contract, described below |
 
 Notes:
 - XLA can introduce a one-time compile cost (you may see a log line like "Compiled cluster using XLA!"). For small, single-pass inference jobs, set `XLA_JIT=off` to avoid this overhead. For larger batches or repeated runs, `XLA_JIT=on` may help.
-- The model file is staged from `/code/model.keras` to `/tmp/model.keras` to avoid slow bind-mount I/O on Windows; this is intentional for faster startup.
+- The model file is staged from `MODEL_PATH` to a unique temporary directory to avoid slow bind-mount I/O on Windows; this is intentional for faster startup.
 
 ## GitHub Actions and DockerHub
 This project uses GitHub Actions to automate the build process and push the Docker image to DockerHub. You can find the image at:
@@ -82,3 +83,128 @@ For users needing the older version, the v1.0.11 image is also available on Dock
 ```bash
 docker pull zaandahl/mewc-predict:v1.0.11
 ```
+
+
+## Prediction integrity contract
+
+Use a complete `snips/crop_manifest.json` from the current `mewc-snip`. Each
+record supplies `crop_id`, `crop_file`, `source_file`, and `detection_index`
+(the zero-based index in the original detector list). `crop_id` equals the
+unchanged crop path relative to the snip directory. The crop manifest and the
+actual recursively enumerated image inventory must agree exactly. Empty,
+complete inventories produce a CSV header and zero predictions. Their crop
+inventory, class map, model hashes, and any supplied model declaration are
+validated, but TensorFlow/Keras import, model staging, loading, and inference
+are skipped. Their completion record explicitly sets
+`model_runtime_validated=false` and `skipped_reason=no-eligible-crops`; it does
+not certify loaded-model shapes. Nonempty successful runs set
+`model_runtime_validated=true` and `skipped_reason=null`.
+
+The output CSV retains `filename`, `rand_name`, `label`, `class_id`, `prob`,
+`class_name`, and `class_rank`, and adds `crop_id`, `source_file`, and
+`detection_index`. `filename` is the original crop identity; `rand_name` is
+its actual relative on-disk path, unchanged by prediction. Source/detection
+keys distinguish identical basenames in different folders. All exactly tied
+maximum scores survive `TOP_CLASSES=True`, in class-index order. Ranks use
+competition ranking (1, 1, 3 for two tied maxima); no class is chosen to
+break a tie. `prob` remains the model output score without recalibration.
+
+Prediction never renames crops. An old run without a crop manifest can recover
+its existing randomized filenames only when its previous prediction CSV maps
+every file uniquely through `filename` and `rand_name`. Those files stay in
+place and the same mapping is written again. This recovery cannot reconstruct
+source/detection provenance that the old output never recorded. The current
+end-to-end pipeline requires regenerated crops with a complete crop manifest.
+A lost/ambiguous historical mapping fails explicitly; it is never guessed.
+`RENAME_SNIPS=True` and the obsolete `SNIP_CHARS` environment option are errors.
+
+`prediction_scores.npz` retains the complete unmodified model score matrix,
+even when `TOP_CLASSES=True` filters the tables. It contains three arrays:
+`probabilities` (original numeric dtype and values, crops by classes),
+`crop_ids` (ordered Unicode row identities), and `class_order` (ordered Unicode
+class names). It uses no object arrays and can be read with
+`numpy.load(path, allow_pickle=False)`. Empty runs store a `(0, N)` matrix.
+Consumers can regenerate the expected CSV/PKL table from this archive and the
+crop manifest to verify row completeness, class order, values, and ties.
+The archive filename is reserved and cannot be used for a configured table.
+
+The score archive is written atomically; both table files are staged before
+replacement. Existing outputs are retained as `.previous.<sha256>` backups.
+`prediction_manifest.json` is marked incomplete at run start and complete only
+after all three outputs are written; it records their
+SHA256 hashes, input/prediction/output counts, effective configuration and its
+hash, model/class-map hashes, identity mode, and any provenance limitations.
+Consumers must require a successful process exit, a complete manifest, and
+matching output hashes. This catches interruption between the two file
+replacements, including score archive replacement. Concurrent prediction runs on the same input directory fail to
+acquire the output lock. A failed model call is never retried with a different
+signature after partial predictions have accumulated.
+
+## Model preflight and provenance
+
+Class indices must be unique integers exactly `0..N-1`, and class names must
+be unique nonempty strings. Duplicate YAML keys are rejected. Class order is
+explicitly the order of those indices; without training/export evidence this
+checks internal consistency but cannot establish the historical training label
+order. For nonempty inventories, every loaded model must expose one
+dynamic-batch, fixed-size RGB float32 input
+and one output with `N` columns. SavedModel dispatch is resolved before
+inference from `serving_default`, or the sole available signature. Ambiguous
+inputs/outputs/signatures fail preflight. Every returned batch and the final
+result must have the exact expected number of rows and classes, with finite
+probabilities in `[0, 1]` whose row totals equal one within `rtol=1e-5` and
+`atol=1e-6` (float32 softmax rounding). Logits and unnormalized outputs fail;
+probabilities are never normalized or otherwise changed by the validator.
+
+Architecture options accept exact documented EN/CN/VT names and aliases;
+unknown or truncated misspellings fail. A matching input size alone cannot
+prove architecture identity (for example ENS and VTL both use 384 pixels).
+Architecture and training class-order provenance are therefore reported as
+unverified when a bundle manifest is absent. No architecture is inferred from
+an arbitrary serialized model name, and no training or model settings change.
+
+To bind an independently verified export to prediction, mount its manifest and
+set `MODEL_MANIFEST_PATH`. Required manifest fields are:
+
+```yaml
+schema_version: 1
+architecture: VTL
+model_sha256: <SHA256 of the mounted model file>
+class_map_sha256: <SHA256 of the exact class-map file>
+class_order: [class_at_index_0, class_at_index_1]
+input_shape: [null, 384, 384, 3]
+preprocessing:
+  color_mode: rgb
+  interpolation: bilinear
+  crop_to_aspect_ratio: false
+  value_range: [0, 255]
+  external_normalization: none
+  dtype: float32
+```
+
+Every field is checked before inference; class order must come from the
+training/export record, not a new scientific assumption. The preprocessing
+contract records the established image loader: RGB, bilinear resize, float32
+0–255 pixels and no external normalization. Preprocessing embedded within a
+serialized model stays intact. File hashes bind exact bytes; a SavedModel
+directory hash uses sorted relative POSIX paths, each followed by NUL, the
+file's hexadecimal SHA256, and a newline. Symlinks are rejected in directory
+bundles. Staged model bytes are checked against the source before loading.
+
+Boolean options accept True/False, true/false, 1/0, yes/no, and on/off; invalid
+spellings fail. Integer options reject fractional values. `XLA_JIT` accepts only
+`auto`, `on`, or `off`, and inference uses the TensorFlow backend.
+
+## Lightweight verification
+
+Tests use mocked model signatures and inference, with no TensorFlow install or
+GPU work. From this repository with a sibling `mewc-flow` checkout:
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python pytest numpy pandas pyyaml
+.venv/bin/python -m pytest -q tests ../mewc-flow/test
+```
+
+A real mounted-model smoke test remains necessary to verify serialization,
+runtime dependencies, and the model's frozen inference semantics.
