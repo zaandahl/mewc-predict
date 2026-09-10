@@ -222,6 +222,13 @@ def validate_predictions(predictions, rows, classes):
     return values
 
 
+def predict_keras(model, batches, expected_rows, classes):
+    """Preserve historical Keras predict execution and validate its full result."""
+    # Direct eager calls can differ numerically from Keras's predict graph.
+    # Keep one predict call over the complete, already ordered dataset.
+    return validate_predictions(model.predict(batches, verbose=0), expected_rows, classes)
+
+
 def predict_batches(dispatch, batches, expected_rows, classes):
     chunks = []
     for batch in batches:

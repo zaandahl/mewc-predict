@@ -11,7 +11,7 @@ os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')
 from lib_common import read_yaml, model_img_size_mapping, update_config_from_env
 from prediction_contract import (
     PREPROCESSING, atomic_json, class_names_in_order, class_ids_in_order, crop_inventory,
-    predict_batches, prediction_table, safe_relative, savedmodel_dispatch,
+    predict_batches, predict_keras, prediction_table, safe_relative, savedmodel_dispatch,
     sha256_path, validate_bundle, validate_shapes, write_predictions, write_prediction_scores,
 )
 
@@ -156,7 +156,6 @@ def _infer(config, root, inventory, names, size, source, saved, model_hash):
                 raise ValueError('Keras image input must be float32')
             if config['PRINT_SUMMARY']:
                 model.summary()
-            dispatch = lambda batch: model(batch, training=False)
         snip_root = (root / config['SNIP_DIR']).resolve()
         dataset = tf.keras.preprocessing.image_dataset_from_directory(
             str(snip_root), labels=None, label_mode=None, color_mode='rgb',
@@ -166,7 +165,10 @@ def _infer(config, root, inventory, names, size, source, saved, model_hash):
         if file_order != [row['rand_name'] for row in inventory]:
             raise ValueError('TensorFlow image inventory/order differs from the validated crop inventory')
         batches = dataset.prefetch(tf.data.AUTOTUNE)
-        predictions = predict_batches(dispatch, batches, len(inventory), len(names))
+        if saved:
+            predictions = predict_batches(dispatch, batches, len(inventory), len(names))
+        else:
+            predictions = predict_keras(model, batches, len(inventory), len(names))
     return predictions
 
 

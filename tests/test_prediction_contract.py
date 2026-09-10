@@ -174,10 +174,13 @@ def test_runtime_preflight_inference_and_completion_with_mocked_keras(tmp_path,m
         outputs=[object()]
         input_shape=(None,384,384,3)
         output_shape=(None,2)
-        def __call__(self,batch,training):
-            assert training is False
-            calls.append(len(batch))
-            return np.array([[.5,.5],[.1,.9]])[:len(batch)]
+        def __call__(self,*args,**kwargs):
+            raise AssertionError('Keras inference must preserve model.predict execution')
+        def predict(self,batches,verbose):
+            assert verbose == 0
+            count=sum(len(batch) for batch in batches)
+            calls.append(count)
+            return np.array([[.5,.5],[.1,.9]])[:count]
     class Dataset:
         file_paths=[str(snips/'a/same-0.jpg'),str(snips/'b/same-0.jpg')]
         def prefetch(self,*args): return [np.zeros((2,1,1,3))]
@@ -413,3 +416,55 @@ def test_runtime_uses_declared_string_codes_without_relabelling(tmp_path,monkeyp
     config['MODEL_MANIFEST_PATH']=''
     with pytest.raises(ValueError,match='explicit model manifest class_ids'): run(config)
     assert calls==[names]
+
+
+
+def test_keras_dispatch_calls_predict_once_preserving_scores_and_dataset():
+    from prediction_contract import predict_keras
+    batches=object()
+    probabilities=np.array([[.125,.875],[.5,.5]],dtype=np.float32)
+    calls=[]
+    class Model:
+        def __call__(self,*args,**kwargs):
+            raise AssertionError('Direct eager execution changes the numerical path')
+        def predict(self,dataset,verbose):
+            calls.append((dataset,verbose))
+            return probabilities
+    result=predict_keras(Model(),batches,2,2)
+    assert calls==[(batches,0)]
+    assert result is probabilities
+    np.testing.assert_array_equal(result,probabilities)
+
+
+def test_keras_dispatch_failure_is_not_retried_or_replaced_by_eager_calls():
+    from prediction_contract import predict_keras
+    calls=[]
+    class Model:
+        def __call__(self,*args,**kwargs):
+            raise AssertionError('No eager fallback is allowed')
+        def predict(self,dataset,verbose):
+            calls.append(dataset)
+            raise RuntimeError('injected predict failure after internal partial work')
+    dataset=object()
+    with pytest.raises(RuntimeError,match='injected predict failure'):
+        predict_keras(Model(),dataset,2,2)
+    assert calls==[dataset]
+
+
+@pytest.mark.parametrize('returned',[
+    [[.2,.8],[.3,.7]],  # Too many rows.
+    [[.2,.3,.5]],  # Incorrect output width.
+    [[float('nan'),.8]],
+    [[-.1,1.1]],
+    [[.2,.2]],
+])
+def test_keras_dispatch_retains_shape_and_probability_validation(returned):
+    from prediction_contract import predict_keras
+    calls=[]
+    class Model:
+        def predict(self,dataset,verbose):
+            calls.append(dataset)
+            return np.asarray(returned)
+    with pytest.raises(ValueError):
+        predict_keras(Model(),'ordered dataset',1,2)
+    assert calls==['ordered dataset']
